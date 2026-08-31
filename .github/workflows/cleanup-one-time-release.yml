@@ -1,0 +1,36 @@
+name: Cleanup one-time release workflow
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/cleanup-one-time-release.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cleanup-golden-pompano-release-workflow
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Remove one-time workflows and push
+        run: |
+          git config user.name "JINGJAYHUANG"
+          git config user.email "201726583+JINGJAYHUANG@users.noreply.github.com"
+          git rm .github/workflows/publish-v0.1.0.yml
+          git rm .github/workflows/cleanup-one-time-release.yml
+          git commit -m "chore: remove one-time release workflows"
+          git push origin HEAD:main
