@@ -1,0 +1,41 @@
+name: Bug report
+description: Report a reproducible calculation, validation, export or verification problem
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: "Do not include real counterparties, contracts, prices, credentials or personal data. Reduce the issue to a synthetic fixture."
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: textarea
+    id: synthetic_case
+    attributes:
+      label: Synthetic reproduction
+      description: Provide a minimal fictional scenario or link to a public fixture.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result and unit basis
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Public boundary
+      options:
+        - label: I removed real commercial and personal information.
+          required: true
