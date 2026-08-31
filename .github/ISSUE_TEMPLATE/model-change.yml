@@ -1,0 +1,47 @@
+name: Model change proposal
+description: Propose a new basis, cost rule, scenario analysis or evidence control
+title: "model: "
+labels: ["model-change"]
+body:
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Model layer
+      options:
+        - Mass and packaging
+        - Quote and cost basis
+        - Cost responsibility
+        - Customs or tax assumption
+        - Cash flow and financing
+        - Profit sharing
+        - Sensitivity and quote targets
+        - Report and evidence integrity
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: State the ambiguity or decision failure this change prevents.
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: Proposed input and output contract
+      description: Include units, denominators, dates, currencies and failure behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and boundary
+      description: Identify supporting sources and what the proposal still cannot prove.
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: Required positive, negative and boundary tests
+    validations:
+      required: true
