@@ -1,0 +1,75 @@
+name: Finalize public source tree
+
+on:
+  push:
+    branches: [feat/public-v0.1.0]
+    paths:
+      - ".github/workflows/finalize.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize-golden-pompano-export-simulator
+  cancel-in-progress: false
+
+jobs:
+  verify-clean-commit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: feat/public-v0.1.0
+          fetch-depth: 0
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: ""
+
+      - name: Install and verify final generated source
+        run: |
+          python -m pip install --disable-pip-version-check setuptools==80.9.0 wheel==0.45.1
+          python -m pip install --no-deps --no-build-isolation -e .
+          python -m compileall -q src scripts tests
+          python scripts/verify_test_count.py
+          python -m unittest discover -s tests -v
+          gpes validate examples/synthetic_baseline/scenario.json --public-fixture
+          gpes validate examples/synthetic_resilient/scenario.json --public-fixture
+          rm -rf final-check
+          gpes simulate examples/synthetic_baseline/scenario.json \
+            --output-dir final-check \
+            --fixed-time 2026-08-31T00:00:00Z
+          gpes verify final-check
+          python scripts/compare_outputs.py examples/synthetic_baseline/output final-check
+          python scripts/red_team.py final-check --output final-check-red-team.json
+
+      - name: Remove one-time bootstrap assets
+        run: |
+          rm -rf .bootstrap
+          rm -f branch-probe.txt
+          rm -f .github/workflows/bootstrap.yml
+          rm -f .github/workflows/finalize.yml
+          rm -rf final-check final-check-red-team.json
+
+      - name: Audit clean public tree
+        run: |
+          python scripts/public_audit.py .
+          python scripts/check_markdown_links.py .
+          test ! -e .bootstrap
+          test ! -e branch-probe.txt
+          test ! -e .github/workflows/bootstrap.yml
+          test ! -e .github/workflows/finalize.yml
+
+      - name: Commit clean project tree
+        run: |
+          git config user.name "JINGJAYHUANG"
+          git config user.email "201726583+JINGJAYHUANG@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: remove one-time bootstrap assets"
+          git push origin HEAD:feat/public-v0.1.0

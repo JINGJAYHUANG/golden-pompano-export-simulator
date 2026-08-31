@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: ""
+
+      - name: Install pinned build tools
+        run: python -m pip install --disable-pip-version-check setuptools==80.9.0 wheel==0.45.1
+
+      - name: Install package
+        run: python -m pip install --no-deps --no-build-isolation -e .
+
+      - name: Compile source
+        run: python -m compileall -q src scripts tests
+
+      - name: Verify exact test inventory
+        run: python scripts/verify_test_count.py
+
+      - name: Run 523 tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Validate public fixtures
+        run: |
+          gpes validate examples/synthetic_baseline/scenario.json --public-fixture
+          gpes validate examples/synthetic_resilient/scenario.json --public-fixture
+
+      - name: Regenerate deterministic fixtures
+        run: |
+          rm -rf ci-output
+          mkdir -p ci-output
+          gpes simulate examples/synthetic_baseline/scenario.json \
+            --output-dir ci-output/baseline \
+            --fixed-time 2026-08-31T00:00:00Z
+          gpes simulate examples/synthetic_resilient/scenario.json \
+            --output-dir ci-output/resilient \
+            --fixed-time 2026-08-31T00:00:00Z
+          gpes verify ci-output/baseline
+          gpes verify ci-output/resilient
+
+      - name: Compare committed and regenerated outputs
+        run: |
+          python scripts/compare_outputs.py examples/synthetic_baseline/output ci-output/baseline
+          python scripts/compare_outputs.py examples/synthetic_resilient/output ci-output/resilient
+
+      - name: Run nine tamper attacks
+        run: python scripts/red_team.py ci-output/baseline --output ci-output/red-team-results.json
+
+      - name: Audit public boundary and documentation
+        run: |
+          python scripts/public_audit.py .
+          python scripts/check_markdown_links.py .
+          python scripts/verify_demo.py ci-output/baseline
+          python scripts/verify_demo.py ci-output/resilient
+
+  reproducible-wheel:
+    name: Reproducible Wheel
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: ""
+
+      - name: Install pinned build tools
+        run: python -m pip install --disable-pip-version-check setuptools==80.9.0 wheel==0.45.1
+
+      - name: Build twice and compare
+        env:
+          SOURCE_DATE_EPOCH: "1788134400"
+        run: |
+          mkdir -p wheelhouse/a wheelhouse/b
+          python -m pip wheel --no-deps --no-build-isolation . -w wheelhouse/a
+          python -m pip wheel --no-deps --no-build-isolation . -w wheelhouse/b
+          cmp wheelhouse/a/*.whl wheelhouse/b/*.whl
+
+      - name: Install wheel in clean virtual environment
+        run: |
+          python -m venv clean-venv
+          clean-venv/bin/python -m pip install --no-deps wheelhouse/a/*.whl
+          clean-venv/bin/gpes --version
+          clean-venv/bin/gpes validate examples/synthetic_baseline/scenario.json --public-fixture
