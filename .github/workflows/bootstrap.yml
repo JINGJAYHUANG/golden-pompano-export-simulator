@@ -1,0 +1,131 @@
+name: Bootstrap public project
+
+on:
+  push:
+    branches: [feat/public-v0.1.0]
+    paths:
+      - ".bootstrap/**"
+      - ".github/workflows/bootstrap.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bootstrap-golden-pompano-export-simulator
+  cancel-in-progress: false
+
+jobs:
+  generate-verify-commit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: feat/public-v0.1.0
+          fetch-depth: 0
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: ""
+
+      - name: Install pinned build tools
+        run: python -m pip install --disable-pip-version-check setuptools==80.9.0 wheel==0.45.1
+
+      - name: Generate project
+        run: |
+          python .bootstrap/generate_core.py
+          python .bootstrap/generate_content.py
+          python .bootstrap/generate_tests.py
+
+      - name: Apply audited source corrections
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          audit = Path("src/golden_pompano_export_simulator/audit.py")
+          text = audit.read_text(encoding="utf-8")
+          text = text.replace(
+              "from .canonical import pretty_json, sha256_file, sha256_json",
+              "from .canonical import normalize, pretty_json, sha256_file, sha256_json",
+          )
+          text = text.replace(
+              '"payload": event.get("payload", {}),',
+              '"payload": normalize(event.get("payload", {})),',
+          )
+          audit.write_text(text, encoding="utf-8")
+
+          economics = Path("src/golden_pompano_export_simulator/economics.py")
+          text = economics.read_text(encoding="utf-8")
+          text = text.replace("return (low + high) / D(\"2\")", "return high")
+          economics.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Install package
+        run: python -m pip install --no-deps --no-build-isolation -e .
+
+      - name: Compile source
+        run: python -m compileall -q src scripts tests
+
+      - name: Verify exact test inventory
+        run: python scripts/verify_test_count.py
+
+      - name: Run 523 tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Validate public scenarios
+        run: |
+          gpes validate examples/synthetic_baseline/scenario.json --public-fixture
+          gpes validate examples/synthetic_resilient/scenario.json --public-fixture
+
+      - name: Generate committed synthetic runs
+        run: |
+          rm -rf examples/synthetic_baseline/output examples/synthetic_resilient/output
+          gpes simulate examples/synthetic_baseline/scenario.json \
+            --output-dir examples/synthetic_baseline/output \
+            --fixed-time 2026-08-31T00:00:00Z
+          gpes simulate examples/synthetic_resilient/scenario.json \
+            --output-dir examples/synthetic_resilient/output \
+            --fixed-time 2026-08-31T00:00:00Z
+          gpes verify examples/synthetic_baseline/output
+          gpes verify examples/synthetic_resilient/output
+          gpes compare \
+            --baseline examples/synthetic_baseline/scenario.json \
+            --candidate examples/synthetic_resilient/scenario.json \
+            --output examples/scenario-comparison.json
+
+      - name: Run nine tamper attacks
+        run: python scripts/red_team.py examples/synthetic_baseline/output --output examples/red-team-results.json
+
+      - name: Run public and documentation audits
+        run: |
+          python scripts/public_audit.py .
+          python scripts/check_markdown_links.py .
+          python scripts/verify_demo.py examples/synthetic_baseline/output
+          python scripts/verify_demo.py examples/synthetic_resilient/output
+
+      - name: Verify reproducible wheel
+        env:
+          SOURCE_DATE_EPOCH: "1788134400"
+        run: |
+          rm -rf wheelhouse
+          mkdir -p wheelhouse/a wheelhouse/b
+          python -m pip wheel --no-deps --no-build-isolation . -w wheelhouse/a
+          python -m pip wheel --no-deps --no-build-isolation . -w wheelhouse/b
+          cmp wheelhouse/a/*.whl wheelhouse/b/*.whl
+
+      - name: Commit generated project
+        run: |
+          git config user.name "JINGJAYHUANG"
+          git config user.email "201726583+JINGJAYHUANG@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No generated changes to commit"
+          else
+            git commit -m "feat: build auditable export quotation simulator"
+            git push origin HEAD:feat/public-v0.1.0
+          fi
